@@ -106,14 +106,10 @@ def main():
     print("CS 378 - Assignment 8: Logistic Regression (CLOUD VERSION)")
     print("="*80)
     
-    # Check command line arguments
-    if len(sys.argv) < 3:
-        print("Usage: spark-submit logistic_regression_cloud.py <training_data> <testing_data>")
-        print("Example: spark-submit logistic_regression_cloud.py gs://cs378n/TrainingData.txt gs://cs378n/TestingData.txt")
-        sys.exit(1)
+    # Data paths (hardcoded - no command line arguments needed)
+    train_file = "gs://cs378n/TrainingData.txt"
+    test_file = "gs://cs378n/TestingData.txt"
     
-    train_file = sys.argv[1]
-    test_file = sys.argv[2]
     print(f"\nTraining file: {train_file}")
     print(f"Testing file: {test_file}")
     
