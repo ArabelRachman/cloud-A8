@@ -107,12 +107,15 @@ def main():
     print("="*80)
     
     # Check command line arguments
-    if len(sys.argv) < 2:
-        print("Usage: spark-submit logistic_regression_cloud.py gs://bucket-name/path/to/TrainingData.txt")
+    if len(sys.argv) < 3:
+        print("Usage: spark-submit logistic_regression_cloud.py <training_data> <testing_data>")
+        print("Example: spark-submit logistic_regression_cloud.py gs://cs378n/TrainingData.txt gs://cs378n/TestingData.txt")
         sys.exit(1)
     
     train_file = sys.argv[1]
-    print(f"\nInput file: {train_file}")
+    test_file = sys.argv[2]
+    print(f"\nTraining file: {train_file}")
+    print(f"Testing file: {test_file}")
     
     # Initialize Spark - let Dataproc configure the cluster settings
     conf = SparkConf().setAppName("LogisticRegression-Cloud")
@@ -120,43 +123,39 @@ def main():
     sc.setLogLevel("WARN")
     
     # Load data from Google Cloud Storage
-    print("\n=== Loading Data ===")
+    print("\n=== Loading Training Data ===")
     lines_rdd = sc.textFile(train_file)
     total_lines = lines_rdd.count()
-    print(f"Total lines loaded: {total_lines}")
+    print(f"Total training lines loaded: {total_lines}")
     
-    # Process ALL documents first to get labels for stratified split
-    print("\n=== Processing Documents ===")
-    all_docs = lines_rdd.map(process_document).filter(lambda x: x is not None).cache()
-    total_docs = all_docs.count()
-    print(f"Total documents processed: {total_docs}")
-    
-    # Separate by class for stratified split
-    au_docs = all_docs.filter(lambda x: x[1] == 1).cache()
-    wiki_docs = all_docs.filter(lambda x: x[1] == 0).cache()
-    
-    total_au = au_docs.count()
-    total_wiki = wiki_docs.count()
-    print(f"AU court cases: {total_au}")
-    print(f"Wikipedia articles: {total_wiki}")
-    
-    # Stratified split: 80% train, 20% test for EACH class
-    print("\n=== Stratified Train/Test Split ===")
-    au_train, au_test = au_docs.randomSplit([0.8, 0.2], seed=42)
-    wiki_train, wiki_test = wiki_docs.randomSplit([0.8, 0.2], seed=42)
-    
-    train_docs = au_train.union(wiki_train).cache()
-    test_docs = au_test.union(wiki_test).cache()
-    
+    # Process ALL training documents
+    print("\n=== Processing Training Documents ===")
+    train_docs = lines_rdd.map(process_document).filter(lambda x: x is not None).cache()
     num_train = train_docs.count()
-    num_test = test_docs.count()
-    train_au = au_train.count()
-    train_wiki = wiki_train.count()
-    test_au = au_test.count()
-    test_wiki = wiki_test.count()
+    print(f"Total training documents processed: {num_train}")
     
-    print(f"Training: {num_train} docs ({train_au} AU, {train_wiki} Wikipedia)")
-    print(f"Test: {num_test} docs ({test_au} AU, {test_wiki} Wikipedia)")
+    # Count training classes
+    train_au = train_docs.filter(lambda x: x[1] == 1).count()
+    train_wiki = train_docs.filter(lambda x: x[1] == 0).count()
+    print(f"Training - AU court cases: {train_au}")
+    print(f"Training - Wikipedia articles: {train_wiki}")
+    
+    # Load and process testing data
+    print("\n=== Loading Testing Data ===")
+    test_lines_rdd = sc.textFile(test_file)
+    total_test_lines = test_lines_rdd.count()
+    print(f"Total testing lines loaded: {total_test_lines}")
+    
+    print("\n=== Processing Testing Documents ===")
+    test_docs = test_lines_rdd.map(process_document).filter(lambda x: x is not None).cache()
+    num_test = test_docs.count()
+    print(f"Total testing documents processed: {num_test}")
+    
+    # Count testing classes
+    test_au = test_docs.filter(lambda x: x[1] == 1).count()
+    test_wiki = test_docs.filter(lambda x: x[1] == 0).count()
+    print(f"Testing - AU court cases: {test_au}")
+    print(f"Testing - Wikipedia articles: {test_wiki}")
     
     # Build dictionary from training data only
     print("\n=== Building Dictionary ===")
@@ -221,10 +220,10 @@ def main():
     print("="*80)
     
     au_cases = train_docs.filter(lambda x: x[1] == 1)
-    wiki_docs = train_docs.filter(lambda x: x[1] == 0)
+    wiki_articles = train_docs.filter(lambda x: x[1] == 0)
     
     au_count = au_cases.count()
-    wiki_count = wiki_docs.count()
+    wiki_count = wiki_articles.count()
     
     print(f"AU cases: {au_count}, Wikipedia: {wiki_count}")
     print(f"Batch size per class: {BATCH_SIZE}")
@@ -234,7 +233,7 @@ def main():
     for iteration in range(MAX_ITERATIONS):
         # Sample balanced batches - same size for both classes
         au_sample = au_cases.sample(False, min(1.0, BATCH_SIZE / max(au_count, 1)), seed=iteration)
-        wiki_sample = wiki_docs.sample(False, min(1.0, BATCH_SIZE / max(wiki_count, 1)), seed=iteration)
+        wiki_sample = wiki_articles.sample(False, min(1.0, BATCH_SIZE / max(wiki_count, 1)), seed=iteration)
         
         batch_docs = au_sample.union(wiki_sample)
         batch_data = batch_docs.map(

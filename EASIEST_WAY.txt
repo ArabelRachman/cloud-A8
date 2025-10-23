@@ -62,17 +62,36 @@ On the Dataproc page:
 Wait 2-3 minutes for the cluster to start (green checkmark).
 
 ================================================================================
-STEP 5: Upload and Run Your Script (6 clicks)
+STEP 5: Upload and Run Your Script
 ================================================================================
 
 Once cluster shows green checkmark:
+
+**OPTION A: Direct Upload (Easiest)**
 1. Click on "my-spark-cluster"
 2. Click "SUBMIT JOB" at the top
 3. Fill in:
    - Job type: PySpark
-   - Main python file: Click "Browse" and upload logistic_regression_cloud.py
-   - Arguments: gs://cs378n/TrainingData.txt
+   - Main python file: Click "Browse" or "Upload" and select logistic_regression_cloud.py
+   - Arguments (IMPORTANT - put BOTH on separate lines or space-separated):
+     gs://cs378n/TrainingData.txt gs://cs378n/TestingData.txt
 4. Click "SUBMIT"
+
+**OPTION B: If Browse doesn't work - Upload to Cloud Storage First**
+1. Go to Cloud Storage: https://console.cloud.google.com/storage/browser?project=cloud-computing-476020
+2. Click "CREATE BUCKET"
+   - Name: arabel-cs378-bucket (change if needed - must be globally unique)
+   - Region: us-central1
+   - Click "CREATE"
+3. Click on your bucket, then "UPLOAD FILES"
+4. Upload logistic_regression_cloud.py
+5. Copy the file path (e.g., gs://arabel-cs378-bucket/logistic_regression_cloud.py)
+6. Go back to Dataproc, click "SUBMIT JOB"
+7. Fill in:
+   - Job type: PySpark
+   - Main python file: gs://arabel-cs378-bucket/logistic_regression_cloud.py
+   - Arguments: gs://cs378n/TrainingData.txt gs://cs378n/TestingData.txt
+8. Click "SUBMIT"
 
 The job will run for 30-60 minutes.
 
@@ -132,7 +151,7 @@ gcloud dataproc jobs submit pyspark \
     gs://YOUR_BUCKET/logistic_regression_cloud.py \
     --cluster=spark-lr-cluster \
     --region=us-central1 \
-    -- gs://cs378n/TrainingData.txt
+    -- gs://cs378n/TrainingData.txt gs://cs378n/TestingData.txt
 
 # Delete cluster when done
 gcloud dataproc clusters delete spark-lr-cluster --region=us-central1 --quiet
