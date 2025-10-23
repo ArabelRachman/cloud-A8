@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Log files
+*.log
+output.log
+run_output.log
+simple_output.log
+complete_output.log
+fixed_run.log
+fresh_run.log
+final_balanced_run.log
+latest.txt
+
+# Large data files
+SmallTrainingData.txt
+TrainingData.txt
+TestingData.txt
+
+# Temporary files
+*.tmp
+*.bak
+*~
+.DS_Store
+a
+
+# Google Cloud SDK
+google-cloud-sdk/
+yes/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

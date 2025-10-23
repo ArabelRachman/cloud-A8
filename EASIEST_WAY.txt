@@ -1,0 +1,167 @@
+================================================================================
+SIMPLEST CLOUD DEPLOYMENT - NO CLI NEEDED
+================================================================================
+
+Since authentication is required for gcloud, here's the EASIEST way to run
+your code on Google Cloud using just your web browser:
+
+================================================================================
+STEP 1: Copy Your Python Script
+================================================================================
+
+Your script is ready at:
+/u/arabel/cloud-computing/A8/logistic_regression_cloud.py
+
+You'll need to upload this in Step 4.
+
+================================================================================
+STEP 2: Open Google Cloud Dataproc Console
+================================================================================
+
+Direct link:
+https://console.cloud.google.com/dataproc/clusters?project=cloud-computing-476020
+
+Click this link and login with your Google account.
+
+================================================================================
+STEP 3: Create Cluster (5 clicks)
+================================================================================
+
+1. Click the blue "CREATE CLUSTER" button at the top
+2. Fill in these settings:
+   
+   **Cluster details:**
+   - Name: spark-lr-cluster
+   - Region: us-central1
+   - Cluster mode: Standard (1 master, N workers)
+   
+   **Configure nodes:**
+   - Machine series: N1
+   - Machine type: n1-standard-4
+   - Primary disk size: 100 GB
+   - Worker nodes: 4
+   - Worker machine type: n1-standard-4
+   - Worker disk size: 100 GB
+   
+   **Customize cluster:**
+   - Image version: 2.1 (Debian 11, Hadoop 3.3, Spark 3.3)
+   
+3. Leave everything else as default
+4. Click "CREATE" at the bottom
+5. Wait 2-3 minutes for cluster to be created
+
+================================================================================
+STEP 4: Upload Python Script to Cloud Storage
+================================================================================
+
+While cluster is creating:
+
+1. Open Cloud Storage: https://console.cloud.google.com/storage/browser?project=cloud-computing-476020
+2. Click "CREATE BUCKET"
+   - Name: your-name-cs378-bucket (must be globally unique)
+   - Region: us-central1
+   - Click CREATE
+3. Click on your new bucket
+4. Click "UPLOAD FILES"
+5. Select: /u/arabel/cloud-computing/A8/logistic_regression_cloud.py
+6. Copy the full path shown (e.g., gs://your-name-cs378-bucket/logistic_regression_cloud.py)
+
+================================================================================
+STEP 5: Submit Spark Job (Easy!)
+================================================================================
+
+1. Go back to Dataproc: https://console.cloud.google.com/dataproc/jobs?project=cloud-computing-476020
+2. Click "SUBMIT JOB"
+3. Fill in:
+   - Cluster: spark-lr-cluster (select from dropdown)
+   - Job type: PySpark
+   - Main python file: gs://your-bucket-name/logistic_regression_cloud.py
+   - Arguments: gs://cs378n/TrainingData.txt
+   - Properties (optional but recommended):
+     * spark.executor.memory: 4g
+     * spark.driver.memory: 4g
+4. Click "SUBMIT"
+
+================================================================================
+STEP 6: Monitor Progress
+================================================================================
+
+The job will take 30-60 minutes. You can:
+- Watch the progress bar
+- Click "VIEW OUTPUT" to see real-time logs
+- See all 4 tasks complete with results
+
+================================================================================
+STEP 7: View Results
+================================================================================
+
+Once complete, click on the job and look at the output logs to see:
+- Task 1: Full batch GD convergence
+- Task 2: Mini-batch GD results
+- Task 3: MLlib training accuracy and top 5 words
+- Task 4: Confusion matrix and F1 score
+
+================================================================================
+STEP 8: DELETE THE CLUSTER (CRITICAL!)
+================================================================================
+
+**DO NOT FORGET THIS STEP!**
+
+1. Go to: https://console.cloud.google.com/dataproc/clusters?project=cloud-computing-476020
+2. Check the box next to "spark-lr-cluster"
+3. Click "DELETE" at the top
+4. Confirm deletion
+
+This prevents ongoing charges!
+
+================================================================================
+ALTERNATIVE: Even Simpler - Use Cloud Shell
+================================================================================
+
+If you want to use commands but avoid installing gcloud locally:
+
+1. Go to: https://console.cloud.google.com
+2. Click the Cloud Shell icon (>_) at the top right
+3. In the Cloud Shell terminal, run these commands:
+
+```bash
+# Set project
+gcloud config set project cloud-computing-476020
+
+# Create cluster
+gcloud dataproc clusters create spark-lr-cluster \
+    --region=us-central1 \
+    --master-machine-type=n1-standard-4 \
+    --num-workers=4 \
+    --worker-machine-type=n1-standard-4 \
+    --image-version=2.1-debian11
+
+# Upload your script first to a bucket, then submit:
+# (Replace YOUR_BUCKET with your bucket name)
+gcloud dataproc jobs submit pyspark \
+    gs://YOUR_BUCKET/logistic_regression_cloud.py \
+    --cluster=spark-lr-cluster \
+    --region=us-central1 \
+    -- gs://cs378n/TrainingData.txt
+
+# Delete cluster when done
+gcloud dataproc clusters delete spark-lr-cluster --region=us-central1 --quiet
+```
+
+================================================================================
+SUMMARY
+================================================================================
+
+**Easiest Path:**
+1. Open Google Cloud Console
+2. Create Dataproc cluster (use settings above)
+3. Upload Python script to Cloud Storage
+4. Submit PySpark job with the script and data path
+5. Wait for results
+6. **DELETE CLUSTER**
+
+**Time:** 5 minutes setup + 30-60 minutes run time
+**Cost:** $2-5 total
+**No CLI installation needed!**
+
+================================================================================
