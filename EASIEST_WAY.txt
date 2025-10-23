@@ -6,16 +6,41 @@ Since authentication is required for gcloud, here's the EASIEST way to run
 your code on Google Cloud using just your web browser:
 
 ================================================================================
-STEP 1: Copy Your Python Script
+STEP 1: Download Large Dataset (Optional - Only if Running Locally)
+================================================================================
+
+**NOTE:** If you're running on Google Cloud Dataproc, you DON'T need to download
+the data - it's already available at gs://cs378n/TrainingData.txt
+
+**Only download if you want to run locally or inspect the data:**
+
+Training Dataset (Large): https://storage.googleapis.com/cs378n/TrainingData.txt
+Testing Dataset (Large): https://storage.googleapis.com/cs378n/TestingData.txt
+
+To download:
+```bash
+cd /u/arabel/cloud-computing/A8
+
+# Download training data (~1.3M documents, ~400MB)
+curl -O https://storage.googleapis.com/cs378n/TrainingData.txt
+
+# Download testing data
+curl -O https://storage.googleapis.com/cs378n/TestingData.txt
+```
+
+**For cloud execution, skip this step - the data is already on Google Cloud!**
+
+================================================================================
+STEP 2: Copy Your Python Script
 ================================================================================
 
 Your script is ready at:
 /u/arabel/cloud-computing/A8/logistic_regression_cloud.py
 
-You'll need to upload this in Step 4.
+You'll need to upload this in Step 5.
 
 ================================================================================
-STEP 2: Open Google Cloud Dataproc Console
+STEP 3: Open Google Cloud Dataproc Console
 ================================================================================
 
 Direct link:
@@ -24,85 +49,50 @@ https://console.cloud.google.com/dataproc/clusters?project=cloud-computing-47602
 Click this link and login with your Google account.
 
 ================================================================================
-STEP 3: Create Cluster (5 clicks)
+STEP 4: Create Cluster (5 clicks)
 ================================================================================
 
-1. Click the blue "CREATE CLUSTER" button at the top
-2. Fill in these settings:
-   
-   **Cluster details:**
-   - Name: spark-lr-cluster
-   - Region: us-central1
-   - Cluster mode: Standard (1 master, N workers)
-   
-   **Configure nodes:**
-   - Machine series: N1
-   - Machine type: n1-standard-4
-   - Primary disk size: 100 GB
-   - Worker nodes: 4
-   - Worker machine type: n1-standard-4
-   - Worker disk size: 100 GB
-   
-   **Customize cluster:**
-   - Image version: 2.1 (Debian 11, Hadoop 3.3, Spark 3.3)
-   
-3. Leave everything else as default
-4. Click "CREATE" at the bottom
-5. Wait 2-3 minutes for cluster to be created
+On the Dataproc page:
+1. Click "CREATE CLUSTER"
+2. Click "CREATE" next to "Cluster on Compute Engine"
+3. Give it a name: "my-spark-cluster"
+4. Scroll down
+5. Click "CREATE"
+
+Wait 2-3 minutes for the cluster to start (green checkmark).
 
 ================================================================================
-STEP 4: Upload Python Script to Cloud Storage
+STEP 5: Upload and Run Your Script (6 clicks)
 ================================================================================
 
-While cluster is creating:
-
-1. Open Cloud Storage: https://console.cloud.google.com/storage/browser?project=cloud-computing-476020
-2. Click "CREATE BUCKET"
-   - Name: your-name-cs378-bucket (must be globally unique)
-   - Region: us-central1
-   - Click CREATE
-3. Click on your new bucket
-4. Click "UPLOAD FILES"
-5. Select: /u/arabel/cloud-computing/A8/logistic_regression_cloud.py
-6. Copy the full path shown (e.g., gs://your-name-cs378-bucket/logistic_regression_cloud.py)
-
-================================================================================
-STEP 5: Submit Spark Job (Easy!)
-================================================================================
-
-1. Go back to Dataproc: https://console.cloud.google.com/dataproc/jobs?project=cloud-computing-476020
-2. Click "SUBMIT JOB"
+Once cluster shows green checkmark:
+1. Click on "my-spark-cluster"
+2. Click "SUBMIT JOB" at the top
 3. Fill in:
-   - Cluster: spark-lr-cluster (select from dropdown)
    - Job type: PySpark
-   - Main python file: gs://your-bucket-name/logistic_regression_cloud.py
+   - Main python file: Click "Browse" and upload logistic_regression_cloud.py
    - Arguments: gs://cs378n/TrainingData.txt
-   - Properties (optional but recommended):
-     * spark.executor.memory: 4g
-     * spark.driver.memory: 4g
 4. Click "SUBMIT"
 
+The job will run for 30-60 minutes.
+
 ================================================================================
-STEP 6: Monitor Progress
+STEP 6: Check Results (2 clicks)
 ================================================================================
 
 The job will take 30-60 minutes. You can:
-- Watch the progress bar
-- Click "VIEW OUTPUT" to see real-time logs
+- Watch the progress bar in the Jobs page
+- Click on the job name to see real-time logs
 - See all 4 tasks complete with results
 
-================================================================================
-STEP 7: View Results
-================================================================================
-
-Once complete, click on the job and look at the output logs to see:
+Once complete, look at the output logs to see:
 - Task 1: Full batch GD convergence
-- Task 2: Mini-batch GD results
+- Task 2: Mini-batch GD results  
 - Task 3: MLlib training accuracy and top 5 words
 - Task 4: Confusion matrix and F1 score
 
 ================================================================================
-STEP 8: DELETE THE CLUSTER (CRITICAL!)
+STEP 7: DELETE THE CLUSTER (CRITICAL!)
 ================================================================================
 
 **DO NOT FORGET THIS STEP!**
