@@ -1,359 +1,257 @@
-# -*- coding: utf-8 -*-
-"""
-Student Name: [Your Name]
-Student UT EID: [Your EID]
+# 1. Student Name: Arabel Rachman
+#     Student EID: agr2999
 
-CS378 - Cloud Computing - Assignment 8
-Spark Logistic Regression for Text Classification - CLOUD VERSION
+# 2. Student Name: Aidan Liu
+#    Student EID: al5445 
+  
+# Course Name: CS378
 
-This script implements regularized logistic regression to classify text documents.
-Optimized for Google Cloud Dataproc execution with large dataset.
-"""
+# Unique Number 1314
+
+# Date Created: 10/23/2025
+
 
 import re
 import math
-import sys
 from pyspark import SparkContext, SparkConf
 from pyspark.mllib.classification import LogisticRegressionWithLBFGS
 from pyspark.mllib.regression import LabeledPoint
 
-# Hyper-parameters
+# parameters
 DICT_SIZE = 20000
-LEARNING_RATE = 0.01  # Increased for faster convergence
-LAMBDA_REG = 0.01  # Low regularization to allow model to learn
-MAX_ITERATIONS = 200  # More iterations for better convergence
-BATCH_SIZE = 100  # Balanced batch size
-DECISION_THRESHOLD = 0.5  # Standard threshold
+LEARNING_RATE = 0.0001
+LAMBDA = 1.0
+MAX_ITER = 100
+BATCH_SIZE = 1024
 
-def extract_doc_info(line):
-    """Extract document ID and determine if it's an AU case."""
+def get_doc_info(line):
     match = re.search(r'<doc\s+id\s*=\s*"([^"]+)"', line)
     if match:
         doc_id = match.group(1)
-        is_au = 1 if doc_id.startswith('AU') else 0
-        return doc_id, is_au
+        label = 1 if doc_id.startswith('AU') else 0
+        return doc_id, label
     return None, None
 
-def extract_words(line):
-    """Extract all lowercase words from line."""
-    # Remove XML tags
+def get_words(line):
     line = re.sub(r'<[^>]+>', ' ', line)
-    # Extract words (letters only, lowercase)
     words = re.findall(r'\b[a-z]{2,}\b', line.lower())
     return words
 
-def process_document(line):
-    """Process a single document line and return (doc_id, label, words)."""
-    doc_id, label = extract_doc_info(line)
+def process_doc(line):
+    doc_id, label = get_doc_info(line)
     if doc_id is None:
         return None
-    words = extract_words(line)
+    words = get_words(line)
     return (doc_id, label, words)
 
-def words_to_tf_vector(words, dictionary):
-    """Convert word list to TF vector using dictionary."""
-    tf_vector = [0.0] * len(dictionary)
+def to_tf_vector(words, word_dict):
+    vec = [0.0] * len(word_dict)
     if not words:
-        return tf_vector
+        return vec
     
-    word_count = float(len(words))
-    for word in words:
-        if word in dictionary:
-            idx = dictionary[word]
-            tf_vector[idx] += 1.0 / word_count
-    
-    return tf_vector
+    total = float(len(words))
+    for w in words:
+        if w in word_dict:
+            vec[word_dict[w]] += 1.0 / total
+    return vec
 
-def compute_loss(data_rdd, weights_bc, lambda_reg):
-    """Compute regularized negative log-likelihood."""
-    N = data_rdd.count()
-    if N == 0:
+def calc_loss(data, weights_bc, lam):
+    n = data.count()
+    if n == 0:
         return 0.0
     
-    def loss_for_point(point):
-        label, features = point
-        theta = sum(w * f for w, f in zip(weights_bc.value, features))
-        # Clip theta to avoid overflow
+    def loss_pt(pt):
+        y, x = pt
+        theta = sum(w * f for w, f in zip(weights_bc.value, x))
         theta = max(min(theta, 700), -700)
-        return -label * theta + math.log(1 + math.exp(theta))
+        return -y * theta + math.log(1 + math.exp(theta))
     
-    data_loss = data_rdd.map(loss_for_point).sum() / N
-    reg_loss = lambda_reg * sum(w * w for w in weights_bc.value)
-    return data_loss + reg_loss
+    data_loss = data.map(loss_pt).sum() / n
+    reg = lam * sum(w * w for w in weights_bc.value)
+    return data_loss + reg
 
-def compute_gradient(data_rdd, weights_bc, lambda_reg):
-    """Compute gradient."""
-    N = data_rdd.count()
-    dict_size = len(weights_bc.value)
+def calc_gradient(data, weights_bc, lam):
+    n = data.count()
+    d = len(weights_bc.value)
     
-    def gradient_for_point(point):
-        label, features = point
-        theta = sum(w * f for w, f in zip(weights_bc.value, features))
-        theta = max(min(theta, 700), -700)  # Clip to avoid overflow
-        exp_theta = math.exp(theta)
-        factor = exp_theta / (1 + exp_theta)
-        return [-features[j] * label + features[j] * factor for j in range(dict_size)]
+    def grad_pt(pt):
+        y, x = pt
+        theta = sum(w * f for w, f in zip(weights_bc.value, x))
+        theta = max(min(theta, 700), -700)
+        sig = math.exp(theta) / (1 + math.exp(theta))
+        return [-x[j] * y + x[j] * sig for j in range(d)]
     
-    total_gradient = data_rdd.map(gradient_for_point).reduce(
-        lambda a, b: [x + y for x, y in zip(a, b)])
-    
-    final_gradient = [(g / N + 2 * lambda_reg * w) 
-                     for g, w in zip(total_gradient, weights_bc.value)]
-    return final_gradient
+    grad_sum = data.map(grad_pt).reduce(lambda a, b: [x + y for x, y in zip(a, b)])
+    return [(g / n + 2 * lam * w) for g, w in zip(grad_sum, weights_bc.value)]
 
 def main():
-    print("="*80)
-    print("CS 378 - Assignment 8: Logistic Regression (CLOUD VERSION)")
-    print("="*80)
-    
-    # Data paths (hardcoded - no command line arguments needed)
     train_file = "gs://cs378n/TrainingData.txt"
     test_file = "gs://cs378n/TestingData.txt"
     
-    print(f"\nTraining file: {train_file}")
-    print(f"Testing file: {test_file}")
-    
-    # Initialize Spark - let Dataproc configure the cluster settings
-    conf = SparkConf().setAppName("LogisticRegression-Cloud")
+    conf = SparkConf().setAppName("LogisticRegression")
     sc = SparkContext(conf=conf)
     sc.setLogLevel("WARN")
     
-    # Load data from Google Cloud Storage
-    print("\n=== Loading Training Data ===")
-    lines_rdd = sc.textFile(train_file)
-    total_lines = lines_rdd.count()
-    print(f"Total training lines loaded: {total_lines}")
+    # load training data
+    print("\nLoading training data...")
+    lines = sc.textFile(train_file)
+    train_docs = lines.map(process_doc).filter(lambda x: x is not None).cache()
+    n_train = train_docs.count()
+    print(f"Training documents: {n_train}")
     
-    # Process ALL training documents
-    print("\n=== Processing Training Documents ===")
-    train_docs = lines_rdd.map(process_document).filter(lambda x: x is not None).cache()
-    num_train = train_docs.count()
-    print(f"Total training documents processed: {num_train}")
+    # load test data
+    print("Loading test data...")
+    test_lines = sc.textFile(test_file)
+    test_docs = test_lines.map(process_doc).filter(lambda x: x is not None).cache()
+    n_test = test_docs.count()
+    print(f"Test documents: {n_test}")
     
-    # Count training classes
-    train_au = train_docs.filter(lambda x: x[1] == 1).count()
-    train_wiki = train_docs.filter(lambda x: x[1] == 0).count()
-    print(f"Training - AU court cases: {train_au}")
-    print(f"Training - Wikipedia articles: {train_wiki}")
+    # build dictionary
+    print(f"\nBuilding dictionary (top {DICT_SIZE} words)...")
+    words = train_docs.flatMap(lambda x: x[2])
+    word_counts = words.map(lambda w: (w, 1)).reduceByKey(lambda a, b: a + b)
+    top = word_counts.sortBy(lambda x: -x[1]).take(DICT_SIZE)
+    word_dict = {w: i for i, (w, c) in enumerate(top)}
+    dict_bc = sc.broadcast(word_dict)
+    print(f"Dictionary size: {len(word_dict)}")
     
-    # Load and process testing data
-    print("\n=== Loading Testing Data ===")
-    test_lines_rdd = sc.textFile(test_file)
-    total_test_lines = test_lines_rdd.count()
-    print(f"Total testing lines loaded: {total_test_lines}")
+    # convert to vectors
+    train_data = train_docs.map(lambda x: (x[1], to_tf_vector(x[2], dict_bc.value))).cache()
+    test_data = test_docs.map(lambda x: (x[0], x[1], to_tf_vector(x[2], dict_bc.value))).cache()
     
-    print("\n=== Processing Testing Documents ===")
-    test_docs = test_lines_rdd.map(process_document).filter(lambda x: x is not None).cache()
-    num_test = test_docs.count()
-    print(f"Total testing documents processed: {num_test}")
+    # Task 1: batch gradient descent
+    print("\n" + "="*70)
+    print("TASK 1: Batch Gradient Descent")
+    print("="*70)
     
-    # Count testing classes
-    test_au = test_docs.filter(lambda x: x[1] == 1).count()
-    test_wiki = test_docs.filter(lambda x: x[1] == 0).count()
-    print(f"Testing - AU court cases: {test_au}")
-    print(f"Testing - Wikipedia articles: {test_wiki}")
+    w = [0.0] * len(word_dict)
+    w_bc = sc.broadcast(w)
     
-    # Build dictionary from training data only
-    print("\n=== Building Dictionary ===")
-    train_words = train_docs.flatMap(lambda x: x[2])  # x[2] is words
-    word_counts = train_words.map(lambda w: (w, 1)).reduceByKey(lambda a, b: a + b)
-    top_words = word_counts.sortBy(lambda x: -x[1]).take(DICT_SIZE)
-    dictionary = {word: i for i, (word, count) in enumerate(top_words)}
-    dictionary_bc = sc.broadcast(dictionary)
-    
-    print(f"Dictionary size: {len(dictionary)}")
-    if len(dictionary) >= 10:
-        print(f"Top 10 words: {[w for w, _ in top_words[:10]]}")
-    
-    if num_train == 0:
-        print("ERROR: No training documents found!")
-        sc.stop()
-        return
-    
-    # Convert to TF vectors
-    print("\n=== Converting to TF Vectors ===")
-    train_data = train_docs.map(
-        lambda x: (x[1], words_to_tf_vector(x[2], dictionary_bc.value))
-    ).cache()
-    
-    test_data = test_docs.map(
-        lambda x: (x[0], x[1], words_to_tf_vector(x[2], dictionary_bc.value))
-    ).cache()
-    
-    # TASK 1: Full Batch Gradient Descent
-    print("\n" + "="*80)
-    print("TASK 1: Full Batch Gradient Descent")
-    print("="*80)
-    
-    weights = [0.0] * len(dictionary)
-    weights_bc = sc.broadcast(weights)
-    
-    print(f"Learning rate: {LEARNING_RATE}")
-    print(f"Regularization: {LAMBDA_REG}")
-    print(f"Iterations: {MAX_ITERATIONS}")
-    
-    for iteration in range(MAX_ITERATIONS):
-        loss = compute_loss(train_data, weights_bc, LAMBDA_REG)
-        gradient = compute_gradient(train_data, weights_bc, LAMBDA_REG)
-        weights = [w - LEARNING_RATE * g for w, g in zip(weights_bc.value, gradient)]
-        weights_bc = sc.broadcast(weights)
+    for i in range(MAX_ITER):
+        loss = calc_loss(train_data, w_bc, LAMBDA)
+        grad = calc_gradient(train_data, w_bc, LAMBDA)
+        w = [wj - LEARNING_RATE * gj for wj, gj in zip(w_bc.value, grad)]
+        w_bc = sc.broadcast(w)
         
-        if iteration % 10 == 0 or iteration == MAX_ITERATIONS - 1:
-            print(f"Iteration {iteration:3d}: Loss = {loss:.6f}")
+        if i % 10 == 0 or i == MAX_ITER - 1:
+            print(f"Iteration {i}: Loss = {loss:.6f}")
     
-    # Top 5 words
-    reverse_dict = {v: k for k, v in dictionary_bc.value.items()}
-    word_weights = [(reverse_dict[i], weights[i]) for i in range(len(weights))]
-    top_5 = sorted(word_weights, key=lambda x: -x[1])[:5]
+    # top 5 words
+    idx_to_word = {v: k for k, v in dict_bc.value.items()}
+    word_weights = [(idx_to_word[i], w[i]) for i in range(len(w))]
+    top5 = sorted(word_weights, key=lambda x: -x[1])[:5]
     
-    print("\n=== Top 5 Words (Largest Coefficients) ===")
-    for word, weight in top_5:
-        print(f"  {word:20s}: {weight:.6f}")
+    print("\nTop 5 words (largest coefficients):")
+    for word, weight in top5:
+        print(f"  {word}: {weight:.6f}")
     
-    # TASK 2: Mini-Batch Gradient Descent
-    print("\n" + "="*80)
+    # Task 2: mini-batch gradient descent
+    print("\n" + "="*70)
     print("TASK 2: Mini-Batch Gradient Descent")
-    print("="*80)
+    print("="*70)
     
-    au_cases = train_docs.filter(lambda x: x[1] == 1)
-    wiki_articles = train_docs.filter(lambda x: x[1] == 0)
+    au_docs = train_docs.filter(lambda x: x[1] == 1)
+    wiki_docs = train_docs.filter(lambda x: x[1] == 0)
+    n_au = au_docs.count()
+    n_wiki = wiki_docs.count()
     
-    au_count = au_cases.count()
-    wiki_count = wiki_articles.count()
+    print(f"AU cases: {n_au}, Wiki: {n_wiki}")
     
-    print(f"AU cases: {au_count}, Wikipedia: {wiki_count}")
-    print(f"Batch size per class: {BATCH_SIZE}")
+    w2 = [0.0] * len(word_dict)
     
-    weights2 = [0.0] * len(dictionary)
-    
-    for iteration in range(MAX_ITERATIONS):
-        # Sample balanced batches - same size for both classes
-        au_sample = au_cases.sample(False, min(1.0, BATCH_SIZE / max(au_count, 1)), seed=iteration)
-        wiki_sample = wiki_articles.sample(False, min(1.0, BATCH_SIZE / max(wiki_count, 1)), seed=iteration)
+    for i in range(MAX_ITER):
+        # sample batches
+        au_batch = au_docs.sample(False, min(1.0, BATCH_SIZE / max(n_au, 1)), seed=i)
+        wiki_batch = wiki_docs.sample(False, min(1.0, BATCH_SIZE / max(n_wiki, 1)), seed=i)
         
-        batch_docs = au_sample.union(wiki_sample)
-        batch_data = batch_docs.map(
-            lambda x: (x[1], words_to_tf_vector(x[2], dictionary_bc.value))
-        ).cache()
+        batch = au_batch.union(wiki_batch)
+        batch_data = batch.map(lambda x: (x[1], to_tf_vector(x[2], dict_bc.value))).cache()
         
-        weights_bc2 = sc.broadcast(weights2)
-        loss = compute_loss(batch_data, weights_bc2, LAMBDA_REG)
-        gradient = compute_gradient(batch_data, weights_bc2, LAMBDA_REG)
-        weights2 = [w - LEARNING_RATE * g for w, g in zip(weights2, gradient)]
+        w2_bc = sc.broadcast(w2)
+        loss = calc_loss(batch_data, w2_bc, LAMBDA)
+        grad = calc_gradient(batch_data, w2_bc, LAMBDA)
+        w2 = [wj - LEARNING_RATE * gj for wj, gj in zip(w2, grad)]
         
         batch_data.unpersist()
         
-        if iteration % 20 == 0 or iteration == MAX_ITERATIONS - 1:
-            print(f"Iteration {iteration:3d}: Negative LLH = {loss:.6f}")
+        if i % 10 == 0 or i == MAX_ITER - 1:
+            print(f"Iteration {i}: Loss = {loss:.6f}")
     
-    word_weights2 = [(reverse_dict[i], weights2[i]) for i in range(len(weights2))]
-    top_5_2 = sorted(word_weights2, key=lambda x: -x[1])[:5]
+    word_weights2 = [(idx_to_word[i], w2[i]) for i in range(len(w2))]
+    top5_2 = sorted(word_weights2, key=lambda x: -x[1])[:5]
     
-    print("\n=== Top 5 Words (Mini-Batch) ===")
-    for word, weight in top_5_2:
-        print(f"  {word:20s}: {weight:.6f}")
+    print("\nTop 5 words (mini-batch):")
+    for word, weight in top5_2:
+        print(f"  {word}: {weight:.6f}")
     
-    # TASK 3: Spark MLlib
-    print("\n" + "="*80)
-    print("TASK 3: Spark MLlib Logistic Regression")
-    print("="*80)
+    # Task 3: Spark MLlib
+    print("\n" + "="*70)
+    print("TASK 3: Spark MLlib")
+    print("="*70)
     
-    # For cloud execution, we can use the full dictionary
-    print(f"Using full dictionary size: {DICT_SIZE}")
-    
-    labeled_points = train_data.map(lambda x: LabeledPoint(x[0], x[1])).cache()
-    print(f"Training with LBFGS, iterations=100, features={DICT_SIZE}")
+    labeled = train_data.map(lambda x: LabeledPoint(x[0], x[1])).cache()
     
     try:
-        model = LogisticRegressionWithLBFGS.train(
-            labeled_points,
-            iterations=100,
-            regParam=LAMBDA_REG,
-            regType='l2'
-        )
+        model = LogisticRegressionWithLBFGS.train(labeled, iterations=100, regParam=LAMBDA, regType='l2')
         
-        train_preds = labeled_points.map(lambda p: (p.label, model.predict(p.features)))
-        train_correct = train_preds.filter(lambda x: x[0] == x[1]).count()
-        train_total = labeled_points.count()
-        accuracy = train_correct / train_total
+        preds = labeled.map(lambda p: (p.label, model.predict(p.features)))
+        correct = preds.filter(lambda x: x[0] == x[1]).count()
+        total = labeled.count()
+        acc = correct / total
         
-        print(f"Training samples: {train_total}")
-        print(f"Correct predictions: {train_correct}")
-        print(f"Training accuracy: {accuracy:.4f}")
+        print(f"Training accuracy: {acc:.4f}")
         
-        # Top 5 words from MLlib model
-        mllib_weights = model.weights.toArray()
-        mllib_word_weights = [(reverse_dict[i], mllib_weights[i]) for i in range(len(mllib_weights))]
-        mllib_top_5 = sorted(mllib_word_weights, key=lambda x: -x[1])[:5]
+        # top 5 words
+        mllib_w = model.weights.toArray()
+        mllib_words = [(idx_to_word[i], mllib_w[i]) for i in range(len(mllib_w))]
+        mllib_top5 = sorted(mllib_words, key=lambda x: -x[1])[:5]
         
-        print("\n=== Top 5 Words (MLlib Model) ===")
-        for word, weight in mllib_top_5:
-            print(f"  {word:20s}: {weight:.6f}")
-            
+        print("\nTop 5 words (MLlib):")
+        for word, weight in mllib_top5:
+            print(f"  {word}: {weight:.6f}")
     except Exception as e:
-        print(f"MLlib training failed: {str(e)}")
-    
+        print(f"MLlib failed: {str(e)}")
     finally:
-        labeled_points.unpersist()
+        labeled.unpersist()
     
-    # TASK 4: Evaluation
-    print("\n" + "="*80)
-    print("TASK 4: Model Evaluation")
-    print("="*80)
+    # Task 4: evaluation
+    print("\n" + "="*70)
+    print("TASK 4: Evaluation")
+    print("="*70)
     
-    weights_final_bc = sc.broadcast(weights2)
+    w_final = sc.broadcast(w2)
     
-    def predict(features):
-        theta = sum(w * f for w, f in zip(weights_final_bc.value, features))
+    def predict(x):
+        theta = sum(w * f for w, f in zip(w_final.value, x))
         prob = 1.0 / (1.0 + math.exp(-min(max(theta, -700), 700)))
-        return 1 if prob >= DECISION_THRESHOLD else 0
+        return 1 if prob >= 0.5 else 0
     
-    predictions = test_data.map(lambda x: (x[0], x[1], predict(x[2]))).cache()
+    preds = test_data.map(lambda x: (x[0], x[1], predict(x[2]))).cache()
     
-    tp = predictions.filter(lambda x: x[1] == 1 and x[2] == 1).count()
-    fp = predictions.filter(lambda x: x[1] == 0 and x[2] == 1).count()
-    tn = predictions.filter(lambda x: x[1] == 0 and x[2] == 0).count()
-    fn = predictions.filter(lambda x: x[1] == 1 and x[2] == 0).count()
+    tp = preds.filter(lambda x: x[1] == 1 and x[2] == 1).count()
+    fp = preds.filter(lambda x: x[1] == 0 and x[2] == 1).count()
+    tn = preds.filter(lambda x: x[1] == 0 and x[2] == 0).count()
+    fn = preds.filter(lambda x: x[1] == 1 and x[2] == 0).count()
     
-    precision = tp / max(tp + fp, 1)
-    recall = tp / max(tp + fn, 1)
-    f1 = 2 * precision * recall / max(precision + recall, 0.0001)
-    accuracy_test = (tp + tn) / max(tp + fp + tn + fn, 1)
+    prec = tp / max(tp + fp, 1)
+    rec = tp / max(tp + fn, 1)
+    f1 = 2 * prec * rec / max(prec + rec, 0.001)
+    acc = (tp + tn) / max(tp + fp + tn + fn, 1)
     
-    print("\n=== Confusion Matrix ===")
-    print(f"True Positives:  {tp:6d}")
-    print(f"False Positives: {fp:6d}")
-    print(f"True Negatives:  {tn:6d}")
-    print(f"False Negatives: {fn:6d}")
-    
-    print("\n=== Metrics ===")
-    print(f"Accuracy:  {accuracy_test:.4f}")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall:    {recall:.4f}")
+    print(f"\nAccuracy:  {acc:.4f}")
+    print(f"Precision: {prec:.4f}")
+    print(f"Recall:    {rec:.4f}")
     print(f"F1 Score:  {f1:.4f}")
-    print(f"Decision Threshold: {DECISION_THRESHOLD}")
     
-    print(f"\n=== Prediction Summary ===")
-    total_predicted_au = tp + fp
-    total_actual_au = tp + fn
-    print(f"Total predicted as AU: {total_predicted_au}")
-    print(f"Total actual AU cases: {total_actual_au}")
-    print(f"Total test samples: {tp + fp + tn + fn}")
+    # false positives
+    fps = preds.filter(lambda x: x[1] == 0 and x[2] == 1).take(3)
     
-    # Analyze false positives
-    false_positives = predictions.filter(lambda x: x[1] == 0 and x[2] == 1).take(5)
+    if fps:
+        print(f"\nFalse positives (showing {len(fps)}):")
+        for i, (doc_id, _, _) in enumerate(fps, 1):
+            print(f"  {i}. Document ID: {doc_id}")
     
-    if false_positives:
-        print(f"\n=== False Positive Analysis (Sample) ===")
-        print(f"Showing up to 5 false positives:\n")
-        
-        for i, (doc_id, true_label, pred_label) in enumerate(false_positives, 1):
-            print(f"False Positive #{i}: Document ID = {doc_id}")
-    
-    print("\n" + "="*80)
-    print("ALL TASKS COMPLETED")
-    print("="*80)
-    print(f"\nFinal F1 Score: {f1:.4f}")
+    print(f"\nDone. F1 Score: {f1:.4f}")
     
     sc.stop()
 
